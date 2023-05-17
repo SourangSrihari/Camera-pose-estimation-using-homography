@@ -1,0 +1,155 @@
+import cv2
+import numpy as np
+import math
+import pandas as pd
+from numpy import linalg as LA
+
+def ransac(parameter, limit, samples, p, e, inclusive_points):
+    m, top_val = 0, 0
+    new_val = int(math.log(1 - p)/math.log(1-((1 - e)**samples)))
+    dict = {}
+    point_1 = parameter[0]
+    point_2 = parameter[1]
+
+    while (m < new_val or top_val < inclusive_points):
+        fix = parameter.sample(n=samples, replace = False)
+        homo = finding_homography_function(fix)
+        mistakes = []
+
+        for i, j in zip(point_1, point_2):
+            mat_1 = np.matrix([[i[0]], [i[1]], [1]])
+            mat_2 = np.matrix([[j[0]], [j[1]], [1]])
+            mat_1_round = homo @ mat_2
+            mat_1_round = (1 / mat_1_round.item(2)) * mat_1_round
+            mistakes.append(np.linalg.norm((mat_1) - mat_1_round))
+
+        mist_param = pd.DataFrame(data=mistakes)
+        inliners = mist_param.iloc[:, 0].apply(
+            lambda x: 'True' if x < limit else 'false')
+        num = inliners.value_counts()['True']
+        dict[num] = homo
+        top_val = max(top_val, num)
+
+        if top_val >= inclusive_points:
+            print('Inliyers', top_val)
+            homo = dict[top_val]
+            return homo
+        m += 1
+
+
+
+
+
+def finding_homography_function(ins):
+
+    emp_lis_1=[[]]
+    emp_lis_2=[]
+    for elements in range(len(ins)):
+
+        matrix_1=[ins[elements][0],ins[elements][1],1,0,0,0,-ins[elements][2]*ins[elements][0],-ins[elements][2]*ins[elements][1],-ins[elements][2]]
+        matrix_2=[0,0,0,ins[elements][0],ins[elements][1],1,-ins[elements][3]*ins[elements][0],-ins[elements][3]*ins[elements][1],-ins[elements][3]]
+
+        emp_lis_1.append(matrix_1)
+        emp_lis_1.append(matrix_2)
+
+    emp_lis_1.pop(0)
+    emp_lis_1=np.array(emp_lis_1)
+    emp_lis_1_trans=np.transpose(emp_lis_1)
+    
+    rubric=emp_lis_1_trans@emp_lis_1
+    eigen_value,eigen_vector=LA.eigh(rubric)
+
+    for i in range(9):
+        if(min(eigen_value)==eigen_value[i]):
+            emp_lis_2=eigen_vector[:,i]
+    emp_lis_2=np.reshape(emp_lis_2,(3,3))
+    emp_lis_2=(1/emp_lis_2[2][2])*emp_lis_2
+    return emp_lis_2
+
+
+pic_1 = cv2.imread('/home/sourang/Music/perception_project_2/image_1.jpg', cv2.IMREAD_GRAYSCALE)
+pic_1 = cv2.resize(pic_1, (0,0), fx=0.2, fy=0.2)
+pic_2 = cv2.imread('/home/sourang/Music/perception_project_2/image_2.jpg', cv2.IMREAD_GRAYSCALE)
+pic_2 = cv2.resize(pic_2, (0,0), fx=0.2, fy=0.2)
+pic_3 = cv2.imread('/home/sourang/Music/perception_project_2/image_3.jpg', cv2.IMREAD_GRAYSCALE)
+pic_3 = cv2.resize(pic_3, (0,0), fx=0.2, fy=0.2)
+pic_4 = cv2.imread('/home/sourang/Music/perception_project_2/image_4.jpg', cv2.IMREAD_GRAYSCALE)
+pic_4 = cv2.resize(pic_4, (0,0), fx=0.2, fy=0.2)
+
+feature_detector = cv2.SIFT_create()
+kp1, des1 = feature_detector.detectAndCompute(pic_1,None)
+kp2, des2 = feature_detector.detectAndCompute(pic_2,None)
+
+matching_mechanism = cv2.BFMatcher()
+number_of_matches = matching_mechanism.knnMatch(des1,des2, k=2)
+# number_of_matches = sorted(number_of_matches, key = lambda x:x.distance)
+
+
+good_set_1 = []
+for m,n in number_of_matches:
+    if m.distance < 0.5*n.distance:
+        good_set_1.append(m)
+points= []
+for match in good_set_1:
+        x1, y1 = kp1[match.queryIdx].pt
+        x2, y2 = kp2[match.trainIdx].pt
+        points.append([int(x1), int(y1), int(x2), int(y2)])
+
+# result = cv2.drawMatches(pic_1, kp1, pic_2, kp2, number_of_matches, None, flags = 2)
+
+wrap_1 = cv2.warpPerspective(pic_2, np.linalg.inv(finding_homography_function(points)), (pic_2.shape[1]*2, pic_2.shape[0]*2))
+wrap_1[0:pic_1.shape[0], 0:pic_1.shape[1]] = pic_1
+#------------------------------------------------------------------------------------------------------------------------------------
+
+kp3, des3 = feature_detector.detectAndCompute(pic_3,None)
+kp4, des4 = feature_detector.detectAndCompute(pic_4,None)
+
+matching_mechanism = cv2.BFMatcher()
+number_of_matches = matching_mechanism.knnMatch(des3,des4, k=2)
+# number_of_matches = sorted(number_of_matches, key = lambda x:x.distance)
+
+
+good_set_2 = []
+for m,n in number_of_matches:
+    if m.distance < 0.5*n.distance:
+        good_set_2.append(m)
+points= []
+for match in good_set_2:
+        x3, y3 = kp3[match.queryIdx].pt
+        x4, y4 = kp4[match.trainIdx].pt
+        points.append([int(x3), int(y3), int(x4), int(y4)])
+
+# result = cv2.drawMatches(pic_1, kp1, pic_2, kp2, number_of_matches, None, flags = 2)
+
+wrap_2 = cv2.warpPerspective(pic_4, np.linalg.inv(finding_homography_function(points)), (pic_4.shape[1]*2, pic_4.shape[0]*2))
+wrap_2[0:pic_3.shape[0], 0:pic_3.shape[1]] = pic_3
+
+#-----------------------------------------------------------------------------------------------------------------------------------------------
+
+kp_wrap1, des_wrap1 = feature_detector.detectAndCompute(wrap_1,None)
+kp_wrap2, des_wrap2 = feature_detector.detectAndCompute(wrap_2,None)
+
+matching_mechanism = cv2.BFMatcher()
+number_of_matches = matching_mechanism.knnMatch(des_wrap1,des_wrap2, k=2)
+# number_of_matches = sorted(number_of_matches, key = lambda x:x.distance)
+
+good_set_3 = []
+for m,n in number_of_matches:
+    if m.distance < 0.5*n.distance:
+        good_set_3.append(m)
+points= []
+for match in good_set_3:
+        x3, y3 = kp_wrap1[match.queryIdx].pt
+        x4, y4 = kp_wrap2[match.trainIdx].pt
+        points.append([int(x3), int(y3), int(x4), int(y4)])
+
+# result = cv2.drawMatches(pic_1, kp1, pic_2, kp2, number_of_matches, None, flags = 2)
+
+final_wrap = cv2.warpPerspective(wrap_2, np.linalg.inv(finding_homography_function(points)), (wrap_2.shape[1]*2, wrap_2.shape[0]*2))
+final_wrap[0:wrap_1.shape[0], 0:wrap_1.shape[1]] = wrap_1
+
+cv2.imshow("asd",final_wrap)
+# cv2.imshow("result", result)
+
+cv2.waitKey(0)
+cv2.destroyAllWindows()
